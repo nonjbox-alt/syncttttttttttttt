@@ -1,5 +1,7 @@
 export type RoomMode = 'BROWSE' | 'SCREEN_SHARE' | 'CAMERAS' | 'VIDEO';
 
+export type FullscreenContent = 'none' | 'video' | 'screen' | 'browser';
+
 export interface Participant {
   id: string;
   name: string;
@@ -13,6 +15,7 @@ export interface Participant {
   isSpeaking: boolean;
   volume: number; // 0 to 1
   joinedAt: number;
+  connectionState?: 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 }
 
 export type BrowserEventType =
@@ -57,6 +60,7 @@ export interface SharedVideoState {
   playbackRate: number;
   title: string;
   duration?: number;
+  isLocalFile?: boolean;
 }
 
 export interface ChatMessage {

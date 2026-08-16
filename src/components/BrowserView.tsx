@@ -9,12 +9,13 @@ import {
   Monitor,
   ExternalLink,
   ShieldAlert,
-  SlidersHorizontal,
   Bookmark,
-  Share2,
-  Check,
   Hand,
   Sparkles,
+  Maximize,
+  Minimize,
+  Globe,
+  Compass,
 } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore.ts';
 
@@ -26,7 +27,6 @@ const PRESET_BOOKMARKS = [
   { name: 'OpenStreetMap', url: 'https://www.openstreetmap.org', icon: '🗺️' },
   { name: 'W3Schools', url: 'https://www.w3schools.com', icon: '🎓' },
   { name: 'DuckDuckGo', url: 'https://duckduckgo.com', icon: '🔍' },
-  { name: 'YouTube (Protected)', url: 'https://youtube.com', icon: '🎬' },
 ];
 
 export const BrowserView: React.FC = () => {
@@ -36,23 +36,24 @@ export const BrowserView: React.FC = () => {
     browserBack,
     browserForward,
     browserReload,
-    browserScroll,
     followHost,
     setFollowHost,
     isController,
     isHost,
     currentUserId,
-    currentUserName,
     requestControl,
     respondControl,
     pendingControlRequest,
     toggleScreenShare,
-    setMode,
     participants,
+    fullscreenContent,
+    setFullscreenContent,
+    toggleFullscreen,
   } = useRoomStore();
 
-  const [urlInput, setUrlInput] = useState(browserState.url);
+  const [urlInput, setUrlInput] = useState(browserState.url || '');
   const [isCheckingEmbed, setIsCheckingEmbed] = useState(false);
+  const [showFloatingNav, setShowFloatingNav] = useState(true);
   const [embedCheckResult, setEmbedCheckResult] = useState<{
     isEmbeddable: boolean;
     suggestTabShare?: boolean;
@@ -61,11 +62,19 @@ export const BrowserView: React.FC = () => {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const floatingNavTimerRef = useRef<any>(null);
+
+  const isFullscreen = fullscreenContent === 'browser';
+  const isHomePage = !browserState.url || browserState.url === '' || browserState.url === 'syncroom:home';
 
   // Sync URL input whenever shared browser URL changes
   useEffect(() => {
-    setUrlInput(browserState.url);
-    checkEmbeddability(browserState.url);
+    setUrlInput(browserState.url || '');
+    if (browserState.url && browserState.url !== 'syncroom:home') {
+      checkEmbeddability(browserState.url);
+    } else {
+      setEmbedCheckResult({ isEmbeddable: true });
+    }
   }, [browserState.url]);
 
   const checkEmbeddability = async (targetUrl: string) => {
@@ -87,16 +96,29 @@ export const BrowserView: React.FC = () => {
 
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim()) return;
-    navigateBrowser(urlInput);
+    const query = urlInput.trim();
+    if (!query) return;
+    navigateBrowser(query);
   };
 
   const handleBookmarkClick = (url: string) => {
+    setUrlInput(url);
     navigateBrowser(url);
   };
 
   const handleSwitchToTabShare = async () => {
     await toggleScreenShare();
+  };
+
+  const handleMouseMoveInFullscreen = () => {
+    if (!isFullscreen) return;
+    setShowFloatingNav(true);
+    if (floatingNavTimerRef.current) {
+      clearTimeout(floatingNavTimerRef.current);
+    }
+    floatingNavTimerRef.current = setTimeout(() => {
+      setShowFloatingNav(false);
+    }, 3000);
   };
 
   const controllerName =
@@ -107,17 +129,32 @@ export const BrowserView: React.FC = () => {
   const isUserTheController = isController || browserState.controllerId === currentUserId;
 
   return (
-    <div id="browser-view-container" className="w-full h-full flex flex-col bg-slate-950 overflow-hidden relative select-none">
-      {/* Top Browser Chrome Toolbar */}
-      <div className="h-12 bg-slate-900 border-b border-slate-800 px-3 flex items-center justify-between gap-2 shrink-0">
+    <div
+      ref={containerRef}
+      id="browser-view-container"
+      onMouseMove={handleMouseMoveInFullscreen}
+      className={`w-full h-full flex flex-col bg-slate-950 overflow-hidden relative select-none ${
+        isFullscreen ? 'fixed inset-0 z-50 min-h-[100dvh]' : ''
+      }`}
+    >
+      {/* Top Browser Chrome Toolbar (Visible in standard mode or floating in fullscreen mode) */}
+      <div
+        className={`bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 flex items-center justify-between gap-2 shrink-0 transition-all duration-200 z-30 ${
+          isFullscreen
+            ? `absolute top-0 left-0 right-0 h-12 shadow-2xl ${
+                showFloatingNav ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
+              }`
+            : 'h-12'
+        }`}
+      >
         {/* Navigation buttons */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             id="browser-btn-back"
             onClick={browserBack}
             disabled={!isUserTheController || browserState.historyIndex <= 0}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
-            title="Back"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+            title="Back (←)"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
@@ -125,8 +162,8 @@ export const BrowserView: React.FC = () => {
             id="browser-btn-forward"
             onClick={browserForward}
             disabled={!isUserTheController || browserState.historyIndex >= browserState.history.length - 1}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
-            title="Forward"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+            title="Forward (→)"
           >
             <ArrowRight className="w-4 h-4" />
           </button>
@@ -134,7 +171,7 @@ export const BrowserView: React.FC = () => {
             id="browser-btn-reload"
             onClick={browserReload}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Reload page"
+            title="Reload page (⟳)"
           >
             <RotateCw className="w-4 h-4" />
           </button>
@@ -159,14 +196,15 @@ export const BrowserView: React.FC = () => {
               type="submit"
               disabled={!isUserTheController && followHost}
               className="ml-2 text-slate-400 hover:text-sky-400 disabled:opacity-30 cursor-pointer"
+              title="Navigate to URL"
             >
               <Search className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>
 
-        {/* Controller and Follow Controls */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Controller, Follow & Fullscreen Controls */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Controller Badge */}
           <div
             className={`hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
@@ -207,39 +245,57 @@ export const BrowserView: React.FC = () => {
             </button>
           )}
 
-          {/* Open in external window button */}
-          <a
-            href={browserState.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-            title="Open in new window"
+          {/* External link button */}
+          {browserState.url && (
+            <a
+              href={browserState.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              title="Open in new window"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+
+          {/* True Fullscreen Toggle */}
+          <button
+            id="browser-btn-fullscreen"
+            onClick={() => toggleFullscreen('browser')}
+            className={`p-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+              isFullscreen
+                ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750 hover:text-white'
+            }`}
+            title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter True Fullscreen (⛶)'}
           >
-            <ExternalLink className="w-4 h-4" />
-          </a>
+            {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+          </button>
         </div>
       </div>
 
-      {/* Bookmarks bar */}
-      <div className="h-8 bg-slate-950/80 border-b border-slate-900 px-3 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 text-[11px]">
-        <span className="text-slate-500 flex items-center gap-1 shrink-0 font-medium">
-          <Bookmark className="w-3 h-3" /> Quick:
-        </span>
-        {PRESET_BOOKMARKS.map((bm) => (
-          <button
-            key={bm.name}
-            onClick={() => handleBookmarkClick(bm.url)}
-            className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800/80 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-          >
-            <span>{bm.icon}</span>
-            <span>{bm.name}</span>
-          </button>
-        ))}
-      </div>
+      {/* Bookmarks Quick Bar (Hidden in Fullscreen for immersive space) */}
+      {!isFullscreen && (
+        <div className="h-8 bg-slate-950/80 border-b border-slate-900 px-3 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 text-[11px]">
+          <span className="text-slate-500 flex items-center gap-1 shrink-0 font-medium">
+            <Bookmark className="w-3 h-3" /> Quick:
+          </span>
+          {PRESET_BOOKMARKS.map((bm) => (
+            <button
+              key={bm.name}
+              onClick={() => handleBookmarkClick(bm.url)}
+              className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800/80 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+            >
+              <span>{bm.icon}</span>
+              <span>{bm.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Host Take Control Request Banner (Visible to Host when someone requests) */}
+      {/* Host Take Control Request Banner */}
       {isHost && pendingControlRequest && (
-        <div className="bg-gradient-to-r from-amber-950/80 via-amber-900/60 to-slate-950 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3 text-xs text-amber-200 z-20 animate-fadeIn">
+        <div className="bg-gradient-to-r from-amber-950/80 via-amber-900/60 to-slate-950 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3 text-xs text-amber-200 z-20 animate-fadeIn shrink-0">
           <div className="flex items-center gap-2">
             <Crown className="w-4 h-4 text-amber-400 animate-bounce" />
             <span>
@@ -264,8 +320,65 @@ export const BrowserView: React.FC = () => {
       )}
 
       {/* Browser Body Stage */}
-      <div ref={containerRef} className="flex-1 w-full h-full relative bg-slate-900 flex flex-col items-center justify-center overflow-hidden">
-        {embedCheckResult.isEmbeddable ? (
+      <div className="flex-1 w-full h-full relative bg-slate-900 flex flex-col items-center justify-center overflow-hidden">
+        {isHomePage ? (
+          /* SyncRoom Browser Start / Home Dashboard */
+          <div className="max-w-2xl w-full mx-auto p-6 sm:p-8 space-y-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center mx-auto shadow-xl shadow-sky-500/20">
+              <Globe className="w-8 h-8 text-white" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white tracking-tight">Shared Web Browser</h2>
+              <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                Browse websites together in real time. Enter any URL or choose a destination below to start exploring.
+              </p>
+            </div>
+
+            {/* Quick URL Input */}
+            <form onSubmit={handleUrlSubmit} className="max-w-xl mx-auto flex gap-2">
+              <input
+                type="text"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="Enter URL (e.g. https://wikipedia.org or https://codepen.io)"
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+              />
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:brightness-110 active:scale-[0.99] text-white font-semibold text-xs rounded-xl shadow-lg shadow-sky-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Compass className="w-4 h-4" />
+                <span>Open</span>
+              </button>
+            </form>
+
+            {/* Destination Tiles */}
+            <div className="space-y-3 pt-2 text-left">
+              <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                Popular Shared Destinations:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {PRESET_BOOKMARKS.map((bm) => (
+                  <button
+                    key={bm.name}
+                    onClick={() => handleBookmarkClick(bm.url)}
+                    className="p-3 rounded-xl bg-slate-950/70 hover:bg-slate-800 border border-slate-800/80 hover:border-slate-700 text-left transition-all cursor-pointer flex items-center gap-2.5 group"
+                  >
+                    <span className="text-lg">{bm.icon}</span>
+                    <div className="truncate">
+                      <div className="text-xs font-bold text-slate-200 group-hover:text-white truncate">
+                        {bm.name}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">{bm.url}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : embedCheckResult.isEmbeddable ? (
           /* Embedded Browser IFrame Mode */
           <div className="w-full h-full relative">
             <iframe
@@ -277,10 +390,10 @@ export const BrowserView: React.FC = () => {
               className="w-full h-full border-0 bg-white"
             />
 
-            {/* Subtle Overlay to notify guest if not controller */}
+            {/* Controlled by notice */}
             {!isUserTheController && (
               <div className="absolute top-2 right-2 pointer-events-none">
-                <div className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-[10px] text-slate-300 border border-white/10 shadow-lg">
+                <div className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[10px] text-slate-300 border border-white/10 shadow-lg">
                   👑 Controlled by {controllerName}
                 </div>
               </div>

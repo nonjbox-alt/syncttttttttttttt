@@ -1,13 +1,12 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   Monitor,
   MonitorOff,
   Maximize,
   Minimize,
+  Sparkles,
   Volume2,
   VolumeX,
-  Sparkles,
-  Users,
 } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore.ts';
 import { FloatingCameras } from './FloatingCameras.tsx';
@@ -20,13 +19,19 @@ export const ScreenShareView: React.FC = () => {
     localScreenStream,
     remoteScreenStreams,
     toggleScreenShare,
-    currentUserId,
+    fullscreenContent,
+    setFullscreenContent,
+    toggleFullscreen,
   } = useRoomStore();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const controlsTimeoutRef = useRef<any>(null);
+
   const [objectFit, setObjectFit] = useState<'contain' | 'cover'>('contain');
+  const [isHoveringControls, setIsHoveringControls] = useState(true);
+
+  const isFullscreen = fullscreenContent === 'screen';
 
   // Determine active stream (either local or from remote peer)
   const isLocalSharing = isScreenSharing && !!localScreenStream;
@@ -37,7 +42,6 @@ export const ScreenShareView: React.FC = () => {
   } else if (activeScreenSharerId && remoteScreenStreams[activeScreenSharerId]) {
     currentStream = remoteScreenStreams[activeScreenSharerId];
   } else {
-    // Check if any peer has a screen stream
     const firstRemoteSharer = Object.keys(remoteScreenStreams)[0];
     if (firstRemoteSharer) {
       currentStream = remoteScreenStreams[firstRemoteSharer];
@@ -51,14 +55,24 @@ export const ScreenShareView: React.FC = () => {
     }
   }, [currentStream]);
 
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
+  const handleUserActivity = useCallback(() => {
+    setIsHoveringControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    if (currentStream) {
+      controlsTimeoutRef.current = setTimeout(() => {
+        setIsHoveringControls(false);
+      }, 3000);
+    }
+  }, [currentStream]);
+
+  const handleFullscreenToggle = () => {
+    toggleFullscreen('screen');
+    if (!document.fullscreenElement && containerRef.current) {
       containerRef.current.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
+    } else if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
     }
   };
 
@@ -72,7 +86,11 @@ export const ScreenShareView: React.FC = () => {
     <div
       ref={containerRef}
       id="screen-share-stage"
-      className="w-full h-full relative bg-[#06090f] flex items-center justify-center overflow-hidden select-none"
+      onMouseMove={handleUserActivity}
+      onClick={handleUserActivity}
+      className={`w-full h-full relative bg-[#06090f] flex items-center justify-center overflow-hidden select-none ${
+        isFullscreen ? 'fixed inset-0 z-50 min-h-[100dvh]' : ''
+      }`}
     >
       {currentStream ? (
         <>
@@ -87,8 +105,12 @@ export const ScreenShareView: React.FC = () => {
             } transition-all duration-200`}
           />
 
-          {/* Top Presenter Badge & Controls */}
-          <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20">
+          {/* Top Presenter Badge & Controls Overlay */}
+          <div
+            className={`absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 transition-opacity duration-200 ${
+              isHoveringControls ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
             {/* Presenter Name Badge */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur-md border border-white/10 text-xs text-white shadow-xl pointer-events-auto">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -120,9 +142,9 @@ export const ScreenShareView: React.FC = () => {
 
               <button
                 id="btn-toggle-fullscreen-screen"
-                onClick={toggleFullscreen}
+                onClick={handleFullscreenToggle}
                 className="p-1.5 rounded-full bg-black/70 hover:bg-black/90 text-slate-300 hover:text-white border border-white/10 backdrop-blur-md transition-colors cursor-pointer"
-                title="Toggle Fullscreen"
+                title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'True Fullscreen (⛶)'}
               >
                 {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
               </button>
@@ -142,7 +164,7 @@ export const ScreenShareView: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-xl font-bold text-white tracking-tight">Screen Share Ready</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Share your entire screen, an application window, or a specific browser tab with high definition 60 FPS video and audio.
+              Share your screen, an application window, or a browser tab with 60 FPS video and synchronized audio.
             </p>
           </div>
 

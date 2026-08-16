@@ -39,7 +39,7 @@ export const Header: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
 
-  const participantCount = Object.keys(participants).length;
+  const participantCount = Math.max(1, Object.keys(participants).length);
 
   const handleCopyLink = async () => {
     if (!roomId) return;

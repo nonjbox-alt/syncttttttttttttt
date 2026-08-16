@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   RoomMode,
+  FullscreenContent,
   Participant,
   SharedBrowserState,
   SharedVideoState,
@@ -22,6 +23,18 @@ interface RoomStoreState {
 
   // Diagnostics
   diagnostics: WebRTCDiagnostics;
+
+  // Fullscreen Management
+  fullscreenContent: FullscreenContent;
+  setFullscreenContent: (content: FullscreenContent) => void;
+  toggleFullscreen: (content: FullscreenContent) => void;
+
+  // Local Video Management (Zero Server Upload)
+  localVideoFile: File | null;
+  localVideoBlobUrl: string | null;
+  localVideoFileName: string | null;
+  setLocalVideoFile: (file: File) => void;
+  clearLocalVideoFile: () => void;
 
   // Room State
   mode: RoomMode;
@@ -107,10 +120,10 @@ interface RoomStoreState {
 }
 
 const initialBrowserState: SharedBrowserState = {
-  url: 'https://en.wikipedia.org/wiki/Main_Page',
-  title: 'Wikipedia, the free encyclopedia',
-  history: ['https://en.wikipedia.org/wiki/Main_Page'],
-  historyIndex: 0,
+  url: '',
+  title: 'SyncRoom Shared Browser',
+  history: [],
+  historyIndex: -1,
   scrollX: 0,
   scrollY: 0,
   controllerId: '',
@@ -137,6 +150,58 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
   currentUserName: localStorage.getItem('syncroom_username') || `User${Math.floor(1000 + Math.random() * 9000)}`,
   isHost: false,
   isController: false,
+
+  fullscreenContent: 'none',
+  setFullscreenContent: (content: FullscreenContent) => {
+    set({ fullscreenContent: content });
+  },
+  toggleFullscreen: (content: FullscreenContent) => {
+    set((state) => ({
+      fullscreenContent: state.fullscreenContent === content ? 'none' : content,
+    }));
+  },
+
+  localVideoFile: null,
+  localVideoBlobUrl: null,
+  localVideoFileName: null,
+  setLocalVideoFile: (file: File) => {
+    const prevUrl = get().localVideoBlobUrl;
+    if (prevUrl) {
+      URL.revokeObjectURL(prevUrl);
+    }
+    const blobUrl = URL.createObjectURL(file);
+    set({
+      localVideoFile: file,
+      localVideoBlobUrl: blobUrl,
+      localVideoFileName: file.name,
+      mode: 'VIDEO',
+    });
+
+    // Notify room of local video change without transmitting file bytes
+    socketService.send({
+      type: 'video-event',
+      payload: {
+        action: 'PAUSE',
+        url: blobUrl,
+        mediaType: 'direct',
+        title: file.name,
+        position: 0,
+        isPlaying: false,
+        isLocalFile: true,
+      },
+    });
+  },
+  clearLocalVideoFile: () => {
+    const prevUrl = get().localVideoBlobUrl;
+    if (prevUrl) {
+      URL.revokeObjectURL(prevUrl);
+    }
+    set({
+      localVideoFile: null,
+      localVideoBlobUrl: null,
+      localVideoFileName: null,
+    });
+  },
 
   mode: 'BROWSE',
   participants: {},
@@ -181,14 +246,35 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
   joinRoom: async (roomId: string, name: string) => {
     const cleanRoomId = roomId.trim().toUpperCase();
     const cleanName = name.trim() || `User${Math.floor(1000 + Math.random() * 9000)}`;
+    const userId = socketService.getUserId();
 
     localStorage.setItem('syncroom_username', cleanName);
+
+    const selfParticipant: Participant = {
+      id: userId,
+      name: cleanName,
+      avatarColor: '#38bdf8',
+      isHost: false,
+      isController: false,
+      hasRequestedControl: false,
+      isMicOn: false,
+      isCameraOn: false,
+      isScreenSharing: false,
+      isSpeaking: false,
+      volume: 1,
+      joinedAt: Date.now(),
+      connectionState: 'connecting',
+    };
+
     set({
       roomId: cleanRoomId,
+      currentUserId: userId,
       currentUserName: cleanName,
       connectionStatus: 'connecting',
       chatMessages: [],
-      participants: {},
+      participants: {
+        [userId]: selfParticipant,
+      },
       remoteCamStreams: {},
       remoteScreenStreams: {},
     });

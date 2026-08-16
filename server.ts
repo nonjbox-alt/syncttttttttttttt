@@ -56,10 +56,10 @@ function getOrCreateRoom(roomId: string, hostUserId: string, hostName: string): 
   let room = rooms.get(cleanId);
   if (!room) {
     const initialBrowserState: SharedBrowserState = {
-      url: 'https://en.wikipedia.org/wiki/Main_Page',
-      title: 'Wikipedia, the free encyclopedia',
-      history: ['https://en.wikipedia.org/wiki/Main_Page'],
-      historyIndex: 0,
+      url: '',
+      title: 'SyncRoom Shared Browser',
+      history: [],
+      historyIndex: -1,
       scrollX: 0,
       scrollY: 0,
       controllerId: hostUserId,
@@ -79,12 +79,30 @@ function getOrCreateRoom(roomId: string, hostUserId: string, hostName: string): 
       duration: 596,
     };
 
+    const initialHostParticipant: Participant = {
+      id: hostUserId,
+      name: hostName || `User ${hostUserId.substring(5)}`,
+      avatarColor: getRandomColor(),
+      isHost: true,
+      isController: true,
+      hasRequestedControl: false,
+      isMicOn: false,
+      isCameraOn: false,
+      isScreenSharing: false,
+      isSpeaking: false,
+      volume: 1,
+      joinedAt: Date.now(),
+      connectionState: 'connected',
+    };
+
     room = {
       id: cleanId,
       name: `Room ${cleanId}`,
       hostId: hostUserId,
       mode: 'BROWSE',
-      participants: {},
+      participants: {
+        [hostUserId]: initialHostParticipant,
+      },
       browserState: initialBrowserState,
       videoState: initialVideoState,
       activeScreenSharerId: null,

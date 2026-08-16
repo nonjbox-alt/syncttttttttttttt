@@ -22,7 +22,11 @@ export default function App() {
     connectionStatus,
     currentUserName,
     joinRoom,
+    fullscreenContent,
+    setFullscreenContent,
   } = useRoomStore();
+
+  const isFullscreen = fullscreenContent !== 'none';
 
   // URL route listener (e.g. /room/AB82KX or ?room=AB82KX)
   useEffect(() => {
@@ -36,6 +40,32 @@ export default function App() {
       joinRoom(targetRoom.toUpperCase(), savedName);
     }
   }, [joinRoom, roomId]);
+
+  // Handle Escape key and browser fullscreen sync
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fullscreenContent !== 'none') {
+        setFullscreenContent('none');
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && fullscreenContent !== 'none') {
+        setFullscreenContent('none');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [fullscreenContent, setFullscreenContent]);
 
   // Handle PWA background visibility change & network reconnection
   useEffect(() => {
@@ -72,11 +102,11 @@ export default function App() {
 
   return (
     <div id="syncroom-app-root" className="w-full h-full min-h-[100dvh] flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative select-none">
-      {/* Top Header */}
-      <Header />
+      {/* Top Header - hidden in Fullscreen */}
+      {!isFullscreen && <Header />}
 
       {/* Reconnecting Alert Banner */}
-      {connectionStatus === 'reconnecting' && (
+      {connectionStatus === 'reconnecting' && !isFullscreen && (
         <div className="bg-amber-500/90 text-slate-950 px-4 py-1.5 text-xs font-bold flex items-center justify-center gap-2 z-40 shadow-md">
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           <span>Connection interrupted. Reconnecting to room {roomId}...</span>
@@ -92,13 +122,13 @@ export default function App() {
           {mode === 'VIDEO' && <VideoPlayerView />}
         </div>
 
-        {/* Desktop Sidebars / Mobile Drawers */}
-        <ChatPanel />
-        <ParticipantsPanel />
+        {/* Desktop Sidebars / Mobile Drawers - hidden in Fullscreen */}
+        {!isFullscreen && <ChatPanel />}
+        {!isFullscreen && <ParticipantsPanel />}
       </main>
 
-      {/* Bottom Controls Toolbar */}
-      <BottomToolbar />
+      {/* Bottom Controls Toolbar - hidden in Fullscreen */}
+      {!isFullscreen && <BottomToolbar />}
 
       {/* Popups & Global Overlays */}
       <SettingsModal />

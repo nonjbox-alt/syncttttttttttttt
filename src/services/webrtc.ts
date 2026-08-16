@@ -1,21 +1,32 @@
 import { socketService } from './socket.ts';
-import { IceServerConfig, SignalingMessage } from '../types.ts';
+import { IceServerConfig, SignalingMessage, WebRTCDiagnostics } from '../types.ts';
 
 export interface WebRTCEvents {
   onRemoteStream: (peerId: string, stream: MediaStream, type: 'cam' | 'screen') => void;
   onRemoteStreamRemoved: (peerId: string, type: 'cam' | 'screen') => void;
   onLocalSpeakingChange: (isSpeaking: boolean) => void;
+  onDiagnosticsChange?: (diagnostics: WebRTCDiagnostics) => void;
 }
+
+// Default fallback public STUN servers (Cloudflare & Google)
+const DEFAULT_STUN_SERVERS: IceServerConfig[] = [
+  {
+    urls: [
+      'stun:stun.cloudflare.com:3478',
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+    ],
+  },
+];
 
 class WebRTCManager {
   private localCamStream: MediaStream | null = null;
   private localScreenStream: MediaStream | null = null;
   private peerConnections = new Map<string, RTCPeerConnection>();
   private remoteStreams = new Map<string, { camStream?: MediaStream; screenStream?: MediaStream }>();
-  private iceServers: IceServerConfig[] = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ];
+  private iceServers: IceServerConfig[] = DEFAULT_STUN_SERVERS;
+  private lastIceServerFetchTime: number = 0;
+  private iceRefreshTimer: any = null;
 
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -25,24 +36,89 @@ class WebRTCManager {
   private isMuted: boolean = true;
   private isCamDisabled: boolean = true;
 
+  // Diagnostics State
+  private diagnostics: WebRTCDiagnostics = {
+    stunStatus: 'available',
+    turnStatus: 'unconfigured',
+    iceGatheringState: 'new',
+    iceConnectionState: 'new',
+    peerConnectionState: 'new',
+    activePeerCount: 0,
+    lastIceServerRefresh: Date.now(),
+    serverUrl: 'stun.cloudflare.com:3478',
+  };
+
   constructor() {
     this.fetchIceServers();
+    // Cache & Refresh short-lived TURN/ICE servers every 15 minutes
+    this.iceRefreshTimer = setInterval(() => {
+      this.fetchIceServers();
+    }, 15 * 60 * 1000);
+  }
+
+  public getDiagnostics(): WebRTCDiagnostics {
+    return { ...this.diagnostics };
+  }
+
+  private updateDiagnostics(updates: Partial<WebRTCDiagnostics>) {
+    this.diagnostics = {
+      ...this.diagnostics,
+      ...updates,
+      activePeerCount: this.peerConnections.size,
+    };
+    if (this.events?.onDiagnosticsChange) {
+      this.events.onDiagnosticsChange(this.diagnostics);
+    }
   }
 
   public async fetchIceServers() {
     try {
-      const res = await fetch('/api/config/ice');
-      const data = await res.json();
-      if (data.iceServers && data.iceServers.length > 0) {
-        this.iceServers = data.iceServers;
+      // Primary endpoint for short-lived credentials
+      const res = await fetch('/api/webrtc/ice-servers').catch(() => fetch('/api/config/ice'));
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          this.iceServers = data.iceServers;
+          this.lastIceServerFetchTime = Date.now();
+
+          // Check if TURN is configured in returned ice servers
+          const hasTurn = this.iceServers.some((s) => {
+            const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+            return urls.some((u) => u.startsWith('turn:') || u.startsWith('turns:'));
+          });
+
+          const primaryUrl = Array.isArray(this.iceServers[0]?.urls)
+            ? this.iceServers[0].urls[0]
+            : this.iceServers[0]?.urls || 'stun.cloudflare.com:3478';
+
+          this.updateDiagnostics({
+            stunStatus: 'available',
+            turnStatus: hasTurn ? 'configured' : 'unconfigured',
+            lastIceServerRefresh: this.lastIceServerFetchTime,
+            serverUrl: primaryUrl.replace('stun:', '').replace('turns:', '').replace('turn:', ''),
+          });
+          return;
+        }
       }
     } catch (err) {
-      console.warn('Using fallback STUN servers:', err);
+      console.warn('Using default Cloudflare/Google STUN fallback:', err);
     }
+
+    // Default fallback
+    this.iceServers = DEFAULT_STUN_SERVERS;
+    this.updateDiagnostics({
+      stunStatus: 'available',
+      turnStatus: 'unconfigured',
+      serverUrl: 'stun.cloudflare.com:3478',
+      lastIceServerRefresh: Date.now(),
+    });
   }
 
   public setEvents(events: WebRTCEvents) {
     this.events = events;
+    if (events.onDiagnosticsChange) {
+      events.onDiagnosticsChange(this.diagnostics);
+    }
   }
 
   // --- AUDIO / VIDEO MEDIA STREAM CONTROLS ---
@@ -57,7 +133,6 @@ class WebRTCManager {
     autoGainControl?: boolean;
   }): Promise<MediaStream | null> {
     try {
-      // Stop existing tracks if any
       this.stopLocalCamTracks();
 
       if (!options.audio && !options.video) {
@@ -93,12 +168,10 @@ class WebRTCManager {
         this.setupAudioAnalysis(stream);
       }
 
-      // Update all existing peer connections
       this.syncTracksToAllPeers();
-
       return stream;
     } catch (err) {
-      console.error('Error accessing local user media:', err);
+      console.warn('Local user media access error:', err);
       return null;
     }
   }
@@ -117,7 +190,6 @@ class WebRTCManager {
     }
 
     if (enabled) {
-      // Need to acquire mic track
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -133,7 +205,7 @@ class WebRTCManager {
         this.syncTracksToAllPeers();
         return true;
       } catch (err) {
-        console.error('Failed to enable mic track:', err);
+        console.warn('Failed to enable microphone track:', err);
         return false;
       }
     }
@@ -165,7 +237,7 @@ class WebRTCManager {
         this.syncTracksToAllPeers();
         return true;
       } catch (err) {
-        console.error('Failed to enable camera track:', err);
+        console.warn('Failed to enable camera track:', err);
         return false;
       }
     }
@@ -212,12 +284,11 @@ class WebRTCManager {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
-        audio: true, // capture tab/system audio if allowed by browser
+        audio: true,
       });
 
       this.localScreenStream = stream;
 
-      // Handle user clicking native browser "Stop Sharing" bar
       stream.getVideoTracks()[0].onended = () => {
         this.stopScreenShare();
       };
@@ -285,7 +356,7 @@ class WebRTCManager {
           sum += buffer[i];
         }
         const average = sum / buffer.length;
-        const speaking = average > 18; // Sensible threshold
+        const speaking = average > 18;
 
         if (speaking !== this.isCurrentlySpeaking) {
           this.isCurrentlySpeaking = speaking;
@@ -311,6 +382,7 @@ class WebRTCManager {
     });
 
     this.peerConnections.set(remoteUserId, pc);
+    this.updateDiagnosticsState();
 
     // ICE Candidate handler
     pc.onicecandidate = (event) => {
@@ -323,14 +395,40 @@ class WebRTCManager {
       }
     };
 
+    // ICE Gathering state tracking
+    pc.onicegatheringstatechange = () => {
+      this.updateDiagnosticsState();
+    };
+
+    // ICE Connection state tracking (Decoupled from Room state)
+    pc.oniceconnectionstatechange = () => {
+      this.updateDiagnosticsState();
+      if (pc.iceConnectionState === 'failed') {
+        console.warn(`WebRTC ICE failed for peer ${remoteUserId}, attempting graceful ICE restart`);
+        try {
+          if (typeof (pc as any).restartIce === 'function') {
+            (pc as any).restartIce();
+          } else {
+            this.initiateOffer(remoteUserId, pc, true);
+          }
+        } catch {}
+      }
+    };
+
+    // Peer Connection State Tracking
+    pc.onconnectionstatechange = () => {
+      this.updateDiagnosticsState();
+    };
+
     // Track handler (receive remote streams)
     pc.ontrack = (event) => {
       const [remoteStream] = event.streams;
       if (!remoteStream) return;
 
       const track = event.track;
-      // Determine if screen or camera based on stream ID or video dimensions
-      const isScreen = remoteStream.id.includes('screen') || (track.kind === 'video' && track.label.toLowerCase().includes('screen'));
+      const isScreen =
+        remoteStream.id.includes('screen') ||
+        (track.kind === 'video' && track.label.toLowerCase().includes('screen'));
       const streamType = isScreen ? 'screen' : 'cam';
 
       let userStreams = this.remoteStreams.get(remoteUserId);
@@ -367,12 +465,55 @@ class WebRTCManager {
     return pc;
   }
 
+  private updateDiagnosticsState() {
+    let aggregateIceConn: RTCIceConnectionState = 'new';
+    let aggregateIceGather: RTCIceGatheringState = 'new';
+    let aggregatePeerState: RTCPeerConnectionState = 'new';
+
+    const pcs = Array.from(this.peerConnections.values());
+    if (pcs.length > 0) {
+      // Find highest active state
+      if (pcs.some((p) => p.iceConnectionState === 'connected')) {
+        aggregateIceConn = 'connected';
+      } else if (pcs.some((p) => p.iceConnectionState === 'checking')) {
+        aggregateIceConn = 'checking';
+      } else if (pcs.some((p) => p.iceConnectionState === 'completed')) {
+        aggregateIceConn = 'completed';
+      } else if (pcs.every((p) => p.iceConnectionState === 'failed')) {
+        aggregateIceConn = 'failed';
+      } else if (pcs.some((p) => p.iceConnectionState === 'disconnected')) {
+        aggregateIceConn = 'disconnected';
+      }
+
+      if (pcs.some((p) => p.iceGatheringState === 'gathering')) {
+        aggregateIceGather = 'gathering';
+      } else if (pcs.every((p) => p.iceGatheringState === 'complete')) {
+        aggregateIceGather = 'complete';
+      }
+
+      if (pcs.some((p) => p.connectionState === 'connected')) {
+        aggregatePeerState = 'connected';
+      } else if (pcs.some((p) => p.connectionState === 'connecting')) {
+        aggregatePeerState = 'connecting';
+      }
+    }
+
+    this.updateDiagnostics({
+      iceConnectionState: aggregateIceConn,
+      iceGatheringState: aggregateIceGather,
+      peerConnectionState: aggregatePeerState,
+      activePeerCount: this.peerConnections.size,
+    });
+  }
+
   private addLocalTracksToPeer(pc: RTCPeerConnection) {
     const senders = pc.getSenders();
 
     if (this.localCamStream) {
       this.localCamStream.getTracks().forEach((track) => {
-        const existing = senders.find((s) => s.track && s.track.kind === track.kind && s.track.id === track.id);
+        const existing = senders.find(
+          (s) => s.track && s.track.kind === track.kind && s.track.id === track.id
+        );
         if (!existing) {
           try {
             pc.addTrack(track, this.localCamStream!);
@@ -385,7 +526,9 @@ class WebRTCManager {
 
     if (this.localScreenStream) {
       this.localScreenStream.getTracks().forEach((track) => {
-        const existing = senders.find((s) => s.track && s.track.kind === track.kind && s.track.id === track.id);
+        const existing = senders.find(
+          (s) => s.track && s.track.kind === track.kind && s.track.id === track.id
+        );
         if (!existing) {
           try {
             pc.addTrack(track, this.localScreenStream!);
@@ -401,7 +544,6 @@ class WebRTCManager {
     this.peerConnections.forEach((pc, remoteUserId) => {
       const senders = pc.getSenders();
 
-      // Collect active local tracks
       const activeTracks = new Set<MediaStreamTrack>();
       if (this.localCamStream) {
         this.localCamStream.getTracks().forEach((t) => activeTracks.add(t));
@@ -410,7 +552,6 @@ class WebRTCManager {
         this.localScreenStream.getTracks().forEach((t) => activeTracks.add(t));
       }
 
-      // Remove obsolete senders
       senders.forEach((sender) => {
         if (sender.track && !activeTracks.has(sender.track)) {
           try {
@@ -419,19 +560,21 @@ class WebRTCManager {
         }
       });
 
-      // Add newly added tracks
       this.addLocalTracksToPeer(pc);
-
-      // Renegotiate with offer
       this.initiateOffer(remoteUserId, pc);
     });
   }
 
-  private async initiateOffer(remoteUserId: string, pc: RTCPeerConnection) {
+  private async initiateOffer(
+    remoteUserId: string,
+    pc: RTCPeerConnection,
+    iceRestart: boolean = false
+  ) {
     try {
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
+        iceRestart,
       });
       await pc.setLocalDescription(offer);
 
@@ -463,7 +606,7 @@ class WebRTCManager {
             payload: { answer },
           });
         } catch (err) {
-          console.error('Error handling webrtc-offer:', err);
+          console.warn('Error handling webrtc-offer:', err);
         }
         break;
       }
@@ -474,7 +617,7 @@ class WebRTCManager {
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(msg.payload.answer));
           } catch (err) {
-            console.error('Error setting remote answer:', err);
+            console.warn('Error setting remote answer:', err);
           }
         }
         break;
@@ -506,6 +649,7 @@ class WebRTCManager {
       if (streams.screenStream) this.events?.onRemoteStreamRemoved(userId, 'screen');
       this.remoteStreams.delete(userId);
     }
+    this.updateDiagnosticsState();
   }
 
   private stopLocalCamTracks() {
@@ -516,6 +660,10 @@ class WebRTCManager {
   }
 
   public cleanup() {
+    if (this.iceRefreshTimer) {
+      clearInterval(this.iceRefreshTimer);
+      this.iceRefreshTimer = null;
+    }
     if (this.speechDetectionInterval) {
       clearInterval(this.speechDetectionInterval);
       this.speechDetectionInterval = null;
@@ -530,6 +678,7 @@ class WebRTCManager {
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
     this.remoteStreams.clear();
+    this.updateDiagnosticsState();
   }
 }
 

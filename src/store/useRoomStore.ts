@@ -6,6 +6,7 @@ import {
   SharedVideoState,
   ChatMessage,
   BrowserEvent,
+  WebRTCDiagnostics,
 } from '../types.ts';
 import { socketService } from '../services/socket.ts';
 import { webrtcManager } from '../services/webrtc.ts';
@@ -18,6 +19,9 @@ interface RoomStoreState {
   currentUserName: string;
   isHost: boolean;
   isController: boolean;
+
+  // Diagnostics
+  diagnostics: WebRTCDiagnostics;
 
   // Room State
   mode: RoomMode;
@@ -149,6 +153,8 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
   isParticipantsOpen: false,
   isSettingsOpen: false,
 
+  diagnostics: webrtcManager.getDiagnostics(),
+
   isMicOn: false,
   isCameraOn: false,
   isScreenSharing: false,
@@ -237,6 +243,9 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
             return state;
           });
         }
+      },
+      onDiagnosticsChange: (diagnostics) => {
+        set({ diagnostics });
       },
     });
 

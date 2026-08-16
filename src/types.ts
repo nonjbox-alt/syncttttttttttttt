@@ -89,6 +89,17 @@ export interface IceServerConfig {
   credential?: string;
 }
 
+export interface WebRTCDiagnostics {
+  stunStatus: 'available' | 'checking' | 'failed';
+  turnStatus: 'configured' | 'unconfigured' | 'active';
+  iceGatheringState: RTCIceGatheringState | string;
+  iceConnectionState: RTCIceConnectionState | string;
+  peerConnectionState: RTCPeerConnectionState | string;
+  activePeerCount: number;
+  lastIceServerRefresh: number;
+  serverUrl?: string;
+}
+
 export interface SignalingMessage {
   type:
     | 'join'

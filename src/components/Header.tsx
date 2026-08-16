@@ -34,6 +34,7 @@ export const Header: React.FC = () => {
     browserState,
     currentUserId,
     isHost,
+    diagnostics,
   } = useRoomStore();
 
   const [copied, setCopied] = useState(false);
@@ -191,12 +192,18 @@ export const Header: React.FC = () => {
 
       {/* Right: Participants, Chat, Settings & Connection Status */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-        {/* Connection status indicator */}
-        <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px]">
+        {/* Connection & Network Status Indicator */}
+        <button
+          id="btn-network-status"
+          onClick={toggleSettings}
+          title="Signaling & WebRTC Status (Click for Diagnostics)"
+          className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-850 hover:border-slate-700 transition-colors text-[11px] cursor-pointer"
+        >
           {connectionStatus === 'connected' ? (
             <>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-400 text-[10px]">Connected</span>
+              <span className="text-slate-300 text-[10px] font-medium">Live</span>
+              <span className="text-[9px] text-slate-500 font-mono">STUN</span>
             </>
           ) : (
             <>
@@ -204,7 +211,7 @@ export const Header: React.FC = () => {
               <span className="text-amber-300 text-[10px]">Reconnecting...</span>
             </>
           )}
-        </div>
+        </button>
 
         {/* Participants Panel Toggle */}
         <button

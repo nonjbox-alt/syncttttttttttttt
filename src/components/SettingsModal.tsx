@@ -11,6 +11,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore.ts';
+import { NetworkDiagnostics } from './NetworkDiagnostics.tsx';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -178,6 +179,9 @@ export const SettingsModal: React.FC = () => {
               />
             </label>
           </div>
+
+          {/* WebRTC Diagnostics Panel */}
+          <NetworkDiagnostics />
         </div>
 
         {/* Footer */}

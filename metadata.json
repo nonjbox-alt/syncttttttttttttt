@@ -1,0 +1,12 @@
+{
+  "name": "SyncRoom",
+  "description": "Full Watch Party platform with Shared Browsing, Screen Sharing, WebRTC Webcam & Voice, Synchronized Video, and Realtime Chat.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "display-capture"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

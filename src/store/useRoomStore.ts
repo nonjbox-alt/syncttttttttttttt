@@ -15,14 +15,17 @@ import { webrtcManager } from '../services/webrtc.ts';
 interface RoomStoreState {
   // Connection & Identity
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+  transport: 'websocket' | 'sse' | 'http' | 'none';
   roomId: string | null;
   currentUserId: string | null;
   currentUserName: string;
   isHost: boolean;
   isController: boolean;
 
-  // Diagnostics
+  // Diagnostics & Debug
   diagnostics: WebRTCDiagnostics;
+  isDebugOpen: boolean;
+  toggleDebug: () => void;
 
   // Fullscreen Management
   fullscreenContent: FullscreenContent;
@@ -145,6 +148,7 @@ const initialVideoState: SharedVideoState = {
 
 export const useRoomStore = create<RoomStoreState>((set, get) => ({
   connectionStatus: 'disconnected',
+  transport: 'none',
   roomId: null,
   currentUserId: null,
   currentUserName: localStorage.getItem('syncroom_username') || `User${Math.floor(1000 + Math.random() * 9000)}`,
@@ -219,6 +223,8 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
   isSettingsOpen: false,
 
   diagnostics: webrtcManager.getDiagnostics(),
+  isDebugOpen: false,
+  toggleDebug: () => set((state) => ({ isDebugOpen: !state.isDebugOpen })),
 
   isMicOn: false,
   isCameraOn: false,
@@ -336,8 +342,8 @@ export const useRoomStore = create<RoomStoreState>((set, get) => ({
     });
 
     // Connection change listener
-    socketService.onConnectionChange = (status) => {
-      set({ connectionStatus: status });
+    socketService.onConnectionChange = (status, transport) => {
+      set({ connectionStatus: status, transport });
     };
 
     // Socket message listener

@@ -13,6 +13,7 @@ import {
   Crown,
   Wifi,
   WifiOff,
+  Terminal,
 } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore.ts';
 import { RoomMode } from '../types.ts';
@@ -27,6 +28,8 @@ export const Header: React.FC = () => {
     toggleChat,
     toggleParticipants,
     toggleSettings,
+    toggleDebug,
+    isDebugOpen,
     isChatOpen,
     isParticipantsOpen,
     connectionStatus,
@@ -246,6 +249,20 @@ export const Header: React.FC = () => {
               {unreadChatCount}
             </span>
           )}
+        </button>
+
+        {/* Debug panel toggle */}
+        <button
+          id="toggle-debug-btn"
+          onClick={toggleDebug}
+          className={`p-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+            isDebugOpen
+              ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Realtime & Room Debug Diagnostics (Ctrl+Shift+D)"
+        >
+          <Terminal className="w-3.5 h-3.5" />
         </button>
 
         {/* Settings button */}

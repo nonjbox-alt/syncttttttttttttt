@@ -10,6 +10,7 @@ import { ChatPanel } from './components/ChatPanel.tsx';
 import { ParticipantsPanel } from './components/ParticipantsPanel.tsx';
 import { BottomToolbar } from './components/BottomToolbar.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
+import { RealtimeDebugPanel } from './components/RealtimeDebugPanel.tsx';
 import { ReactionsOverlay } from './components/ReactionsOverlay.tsx';
 import { socketService } from './services/socket.ts';
 import { webrtcManager } from './services/webrtc.ts';
@@ -132,6 +133,7 @@ export default function App() {
 
       {/* Popups & Global Overlays */}
       <SettingsModal />
+      <RealtimeDebugPanel />
       <ReactionsOverlay />
     </div>
   );

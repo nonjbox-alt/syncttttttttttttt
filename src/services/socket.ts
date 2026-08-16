@@ -1,40 +1,56 @@
 import { SignalingMessage } from '../types.ts';
 
 type MessageHandler = (message: SignalingMessage) => void;
-type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
-type StatusHandler = (status: ConnectionStatus) => void;
+export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
+export type TransportType = 'websocket' | 'sse' | 'http' | 'none';
+type StatusHandler = (status: ConnectionStatus, transport: TransportType) => void;
 
 class SocketService {
   private ws: WebSocket | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private statusHandlers: Set<StatusHandler> = new Set();
   private status: ConnectionStatus = 'disconnected';
+  private transport: TransportType = 'none';
   private pingInterval: any = null;
   private timeSyncInterval: any = null;
+  private reconnectTimeout: any = null;
   private sseSource: EventSource | null = null;
   private isConnecting: boolean = false;
-  private pendingJoinPayload: any = null;
+  private reconnectAttempts: number = 0;
+
+  // Stored active session data
+  private pendingJoinPayload: SignalingMessage | null = null;
+  private currentUserId: string = '';
+  private currentRoomId: string = '';
+  private currentUserName: string = '';
+  private currentMediaState: { isMicOn?: boolean; isCameraOn?: boolean } = {};
 
   // NTP Time Synchronization State
   private serverTimeOffset: number = 0;
   private roundTripTime: number = 0;
-  private currentUserId: string = '';
-  private currentRoomId: string = '';
 
   constructor() {
     this.currentUserId = this.getOrCreateUserId();
   }
 
   private getOrCreateUserId(): string {
-    let id = localStorage.getItem('syncroom_user_id');
-    if (!id) {
-      id = `user_${Math.random().toString(36).substring(2, 9)}`;
-      localStorage.setItem('syncroom_user_id', id);
+    try {
+      // Use sessionStorage so every browser tab / window gets a distinct participant ID
+      let id = sessionStorage.getItem('syncroom_session_participant_id');
+      if (!id) {
+        id = `p_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).substring(4)}`;
+        sessionStorage.setItem('syncroom_session_participant_id', id);
+      }
+      return id;
+    } catch {
+      return `p_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).substring(4)}`;
     }
-    return id;
   }
 
   public getUserId(): string {
+    if (!this.currentUserId) {
+      this.currentUserId = this.getOrCreateUserId();
+    }
     return this.currentUserId;
   }
 
@@ -46,55 +62,76 @@ class SocketService {
     return this.status;
   }
 
+  public getTransport(): TransportType {
+    return this.transport;
+  }
+
   public connect(
     roomId?: string,
     userName?: string,
     isMicOn?: boolean,
     isCameraOn?: boolean
   ): Promise<boolean> {
-    if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
-      if (roomId && userName) {
-        this.joinRoom(roomId, userName, { isMicOn, isCameraOn });
-      }
+    if (roomId) this.currentRoomId = roomId.trim().toUpperCase();
+    if (userName) this.currentUserName = userName.trim();
+    if (isMicOn !== undefined || isCameraOn !== undefined) {
+      this.currentMediaState = { isMicOn, isCameraOn };
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.joinRoom(this.currentRoomId, this.currentUserName, this.currentMediaState);
+      return Promise.resolve(true);
+    }
+
+    if (this.isConnecting) {
       return Promise.resolve(true);
     }
 
     this.isConnecting = true;
-    this.setStatus('connected'); // Optimistic status: Instant connected feel
+    this.setStatus('reconnecting', 'none');
 
     return new Promise((resolve) => {
       try {
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+          this.reconnectTimeout = null;
+        }
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
         const wsUrl = `${protocol}//${host}/ws`;
 
-        this.ws = new WebSocket(wsUrl);
+        const ws = new WebSocket(wsUrl);
+        this.ws = ws;
 
         const connectionTimer = setTimeout(() => {
-          if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
-            console.warn('WS timeout, activating SSE/REST fallback');
-            this.fallbackToHttpSync(roomId, userName, isMicOn, isCameraOn);
+          if (ws.readyState !== WebSocket.OPEN) {
+            console.warn('WS connect timeout, activating HTTP/SSE fallback');
+            this.isConnecting = false;
+            this.fallbackToHttpSync();
             resolve(true);
           }
-        }, 2500);
+        }, 3000);
 
-        this.ws.onopen = () => {
+        ws.onopen = () => {
           clearTimeout(connectionTimer);
           this.isConnecting = false;
-          this.setStatus('connected');
+          this.reconnectAttempts = 0;
+          this.setStatus('connected', 'websocket');
           this.startHeartbeat();
           this.syncClock();
 
-          if (this.pendingJoinPayload) {
+          // Send join room payload once WebSocket is open
+          if (this.currentRoomId && this.currentUserName) {
+            this.sendJoinMessage();
+          } else if (this.pendingJoinPayload) {
             this.send(this.pendingJoinPayload);
             this.pendingJoinPayload = null;
-          } else if (roomId && userName) {
-            this.joinRoom(roomId, userName, { isMicOn, isCameraOn });
           }
           resolve(true);
         };
 
-        this.ws.onmessage = (event) => {
+        ws.onmessage = (event) => {
           try {
             const message: SignalingMessage = JSON.parse(event.data);
             this.handleIncomingMessage(message);
@@ -103,47 +140,85 @@ class SocketService {
           }
         };
 
-        this.ws.onerror = (error) => {
-          console.warn('WebSocket error, falling back to HTTP sync:', error);
-          this.fallbackToHttpSync(roomId, userName, isMicOn, isCameraOn);
+        ws.onerror = (error) => {
+          console.warn('WebSocket connection error, activating HTTP sync:', error);
+          clearTimeout(connectionTimer);
+          if (this.isConnecting) {
+            this.isConnecting = false;
+            this.fallbackToHttpSync();
+            resolve(true);
+          }
         };
 
-        this.ws.onclose = () => {
+        ws.onclose = () => {
           this.isConnecting = false;
           this.stopHeartbeat();
-          this.fallbackToHttpSync(roomId, userName, isMicOn, isCameraOn);
+          if (this.currentRoomId) {
+            this.setStatus('reconnecting', 'none');
+            this.scheduleReconnect();
+          } else {
+            this.setStatus('disconnected', 'none');
+          }
         };
       } catch (err) {
-        console.warn('WebSocket connection error:', err);
-        this.fallbackToHttpSync(roomId, userName, isMicOn, isCameraOn);
+        console.warn('WebSocket init exception:', err);
+        this.isConnecting = false;
+        this.fallbackToHttpSync();
         resolve(true);
       }
     });
   }
 
-  private fallbackToHttpSync(
-    roomId?: string,
-    userName?: string,
-    isMicOn?: boolean,
-    isCameraOn?: boolean
-  ) {
-    const targetRoom = (roomId || this.currentRoomId || '').toUpperCase();
+  private scheduleReconnect() {
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 5000);
+    this.reconnectAttempts++;
+    this.reconnectTimeout = setTimeout(() => {
+      if (this.currentRoomId) {
+        this.connect(this.currentRoomId, this.currentUserName, this.currentMediaState.isMicOn, this.currentMediaState.isCameraOn);
+      }
+    }, delay);
+  }
+
+  private sendJoinMessage() {
+    const payload: SignalingMessage = {
+      type: 'join',
+      payload: {
+        roomId: this.currentRoomId,
+        name: this.currentUserName,
+        userId: this.getUserId(),
+        isMicOn: this.currentMediaState?.isMicOn ?? false,
+        isCameraOn: this.currentMediaState?.isCameraOn ?? false,
+      },
+    };
+    this.send(payload);
+  }
+
+  private fallbackToHttpSync() {
+    const targetRoom = this.currentRoomId;
     if (!targetRoom) return;
 
-    this.currentRoomId = targetRoom;
-    this.setStatus('connected');
+    this.setStatus('connected', 'http');
 
-    // Connect SSE fallback if available
+    // Connect SSE fallback if supported
     if (!this.sseSource && typeof EventSource !== 'undefined') {
       try {
-        const sseUrl = `/api/room/${targetRoom}/events?userId=${this.currentUserId}`;
+        const sseUrl = `/api/room/${targetRoom}/events?userId=${this.getUserId()}`;
         this.sseSource = new EventSource(sseUrl);
+
+        this.sseSource.onopen = () => {
+          this.setStatus('connected', 'sse');
+        };
 
         this.sseSource.onmessage = (event) => {
           try {
             const msg: SignalingMessage = JSON.parse(event.data);
             this.handleIncomingMessage(msg);
           } catch {}
+        };
+
+        this.sseSource.onerror = () => {
+          this.setStatus('connected', 'http');
         };
       } catch (e) {
         console.warn('SSE setup warning:', e);
@@ -155,10 +230,10 @@ class SocketService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: userName?.trim() || `User ${this.currentUserId.substring(5)}`,
-        userId: this.currentUserId,
-        isMicOn: !!isMicOn,
-        isCameraOn: !!isCameraOn,
+        name: this.currentUserName || `User ${this.getUserId().substring(5)}`,
+        userId: this.getUserId(),
+        isMicOn: !!this.currentMediaState?.isMicOn,
+        isCameraOn: !!this.currentMediaState?.isCameraOn,
       }),
     })
       .then((res) => res.json())
@@ -169,7 +244,7 @@ class SocketService {
             payload: {
               room: data.room,
               messages: data.messages || [],
-              currentUserId: this.currentUserId,
+              currentUserId: this.getUserId(),
               serverTime: data.serverTime || Date.now(),
             },
           });
@@ -183,49 +258,14 @@ class SocketService {
     name: string,
     mediaState?: { isMicOn?: boolean; isCameraOn?: boolean }
   ) {
-    const cleanRoomId = roomId.trim().toUpperCase();
-    this.currentRoomId = cleanRoomId;
-
-    const payload: SignalingMessage = {
-      type: 'join',
-      payload: {
-        roomId: cleanRoomId,
-        name: name.trim(),
-        userId: this.currentUserId,
-        isMicOn: mediaState?.isMicOn ?? false,
-        isCameraOn: mediaState?.isCameraOn ?? false,
-      },
-    };
+    this.currentRoomId = roomId.trim().toUpperCase();
+    this.currentUserName = name.trim();
+    if (mediaState) this.currentMediaState = mediaState;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.send(payload);
+      this.sendJoinMessage();
     } else {
-      this.pendingJoinPayload = payload;
-      fetch(`/api/room/${cleanRoomId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          userId: this.currentUserId,
-          isMicOn: mediaState?.isMicOn ?? false,
-          isCameraOn: mediaState?.isCameraOn ?? false,
-        }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.room) {
-            this.handleIncomingMessage({
-              type: 'room-state',
-              payload: {
-                room: data.room,
-                messages: data.messages || [],
-                currentUserId: this.currentUserId,
-                serverTime: data.serverTime || Date.now(),
-              },
-            });
-          }
-        })
-        .catch(() => {});
+      this.connect(this.currentRoomId, this.currentUserName, mediaState?.isMicOn, mediaState?.isCameraOn);
     }
   }
 
@@ -233,7 +273,7 @@ class SocketService {
     const payload = {
       ...message,
       timestamp: Date.now(),
-      fromUserId: this.currentUserId,
+      fromUserId: this.getUserId(),
     };
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -254,7 +294,7 @@ class SocketService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
-        userId: this.currentUserId,
+        userId: this.getUserId(),
       }),
     }).catch(() => {});
   }
@@ -330,16 +370,21 @@ class SocketService {
   public set onConnectionChange(handler: StatusHandler) {
     this.statusHandlers.clear();
     this.statusHandlers.add(handler);
-    handler(this.status);
+    handler(this.status, this.transport);
   }
 
-  private setStatus(newStatus: ConnectionStatus) {
+  private setStatus(newStatus: ConnectionStatus, newTransport: TransportType) {
     this.status = newStatus;
-    this.statusHandlers.forEach((handler) => handler(newStatus));
+    this.transport = newTransport;
+    this.statusHandlers.forEach((handler) => handler(newStatus, newTransport));
   }
 
   public disconnect() {
     this.stopHeartbeat();
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
     if (this.sseSource) {
       this.sseSource.close();
       this.sseSource = null;
@@ -350,8 +395,9 @@ class SocketService {
       this.ws.close();
       this.ws = null;
     }
-    this.setStatus('disconnected');
+    this.setStatus('disconnected', 'none');
   }
 }
 
 export const socketService = new SocketService();
+

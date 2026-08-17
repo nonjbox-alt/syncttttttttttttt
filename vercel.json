@@ -6,10 +6,10 @@
   "framework": "vite",
   "functions": {
     "api/ws.ts": {
-      "includeFiles": ["dist/server.cjs"]
+      "includeFiles": "dist/server.cjs"
     },
     "api/[...path].ts": {
-      "includeFiles": ["dist/server.cjs"]
+      "includeFiles": "dist/server.cjs"
     }
   },
   "rewrites": [

@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useRoomStore } from './store/useRoomStore.ts';
 import { Lobby } from './components/Lobby.tsx';
 import { Header } from './components/Header.tsx';
-import { BrowserView } from './components/BrowserView.tsx';
+import { HyperbeamBrowserView } from './components/HyperbeamBrowserView.tsx';
 import { ScreenShareView } from './components/ScreenShareView.tsx';
 import { CameraGridView } from './components/CameraGridView.tsx';
 import { VideoPlayerView } from './components/VideoPlayerView.tsx';
@@ -13,8 +13,7 @@ import { SettingsModal } from './components/SettingsModal.tsx';
 import { RealtimeDebugPanel } from './components/RealtimeDebugPanel.tsx';
 import { ReactionsOverlay } from './components/ReactionsOverlay.tsx';
 import { socketService } from './services/socket.ts';
-import { webrtcManager } from './services/webrtc.ts';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 export default function App() {
   const {
@@ -29,7 +28,6 @@ export default function App() {
 
   const isFullscreen = fullscreenContent !== 'none';
 
-  // URL route listener (e.g. /room/AB82KX or ?room=AB82KX)
   useEffect(() => {
     const pathMatch = window.location.pathname.match(/\/room\/([a-zA-Z0-9]+)/i);
     const urlParams = new URLSearchParams(window.location.search);
@@ -42,14 +40,11 @@ export default function App() {
     }
   }, [joinRoom, roomId]);
 
-  // Handle Escape key and browser fullscreen sync
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && fullscreenContent !== 'none') {
         setFullscreenContent('none');
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        }
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       }
     };
 
@@ -61,52 +56,38 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, [fullscreenContent, setFullscreenContent]);
 
-  // Handle PWA background visibility change & network reconnection
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && roomId) {
-        // App returned from background
-        if (!socketService.isConnected) {
-          socketService.connect(roomId, currentUserName, false, false);
-        } else {
-          socketService.send({ type: 'ping', timestamp: Date.now() });
-        }
+        if (!socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
+        else socketService.send({ type: 'ping', timestamp: Date.now() });
       }
     };
 
     const handleOnline = () => {
-      if (roomId && !socketService.isConnected) {
-        socketService.connect(roomId, currentUserName, false, false);
-      }
+      if (roomId && !socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('online', handleOnline);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('online', handleOnline);
     };
   }, [roomId, currentUserName]);
 
-  // If not in a room, render Lobby
-  if (!roomId) {
-    return <Lobby />;
-  }
+  if (!roomId) return <Lobby />;
 
   return (
     <div id="syncroom-app-root" className="w-full h-full min-h-[100dvh] flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative select-none">
-      {/* Top Header - hidden in Fullscreen */}
       {!isFullscreen && <Header />}
 
-      {/* Reconnecting Alert Banner */}
       {connectionStatus === 'reconnecting' && !isFullscreen && (
         <div className="bg-amber-500/90 text-slate-950 px-4 py-1.5 text-xs font-bold flex items-center justify-center gap-2 z-40 shadow-md">
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -114,24 +95,19 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Center Stage */}
       <main className="flex-1 w-full h-full relative overflow-hidden flex">
         <div className="flex-1 w-full h-full relative overflow-hidden">
-          {mode === 'BROWSE' && <BrowserView />}
+          {mode === 'BROWSE' && <HyperbeamBrowserView />}
           {mode === 'SCREEN_SHARE' && <ScreenShareView />}
           {mode === 'CAMERAS' && <CameraGridView />}
           {mode === 'VIDEO' && <VideoPlayerView />}
         </div>
 
-        {/* Desktop Sidebars / Mobile Drawers - hidden in Fullscreen */}
         {!isFullscreen && <ChatPanel />}
         {!isFullscreen && <ParticipantsPanel />}
       </main>
 
-      {/* Bottom Controls Toolbar - hidden in Fullscreen */}
       {!isFullscreen && <BottomToolbar />}
-
-      {/* Popups & Global Overlays */}
       <SettingsModal />
       <RealtimeDebugPanel />
       <ReactionsOverlay />

@@ -3,24 +3,10 @@ import { ArrowLeft, ArrowRight, RotateCw, Lock, Search, Crown, ExternalLink, Han
 import { useRoomStore } from '../store/useRoomStore.ts';
 
 const WORKER_URL = (import.meta.env.VITE_BROWSER_WORKER_URL || '').replace(/\/$/, '');
+const WORKER_TOKEN = import.meta.env.VITE_BROWSER_WORKER_TOKEN || '';
 
 export const RemoteBrowserView: React.FC = () => {
-  const {
-    roomId,
-    browserState,
-    followHost,
-    setFollowHost,
-    isController,
-    isHost,
-    currentUserId,
-    requestControl,
-    respondControl,
-    pendingControlRequest,
-    participants,
-    fullscreenContent,
-    toggleFullscreen,
-  } = useRoomStore();
-
+  const { roomId, browserState, followHost, setFollowHost, isController, isHost, currentUserId, requestControl, respondControl, pendingControlRequest, participants, fullscreenContent, toggleFullscreen } = useRoomStore();
   const [urlInput, setUrlInput] = useState(browserState.url || '');
   const [status, setStatus] = useState<'offline' | 'connecting' | 'connected' | 'error'>('offline');
   const [error, setError] = useState('');
@@ -31,51 +17,34 @@ export const RemoteBrowserView: React.FC = () => {
   const isUserTheController = isController || browserState.controllerId === currentUserId;
   const controllerName = browserState.controllerName || (browserState.controllerId && participants[browserState.controllerId]?.name) || 'Host';
 
-  useEffect(() => {
-    setUrlInput(browserState.url || '');
-  }, [browserState.url]);
+  useEffect(() => setUrlInput(browserState.url || ''), [browserState.url]);
 
   useEffect(() => {
     if (!WORKER_URL || !roomId) {
       setStatus('error');
-      setError('VITE_BROWSER_WORKER_URL is not configured. Deploy the browser-worker and add its wss:// URL to Vercel.');
+      setError('Browser worker is not configured.');
       return;
     }
-
     setStatus('connecting');
-    const wsUrl = `${WORKER_URL.replace(/^http/, 'ws')}/browser?roomId=${encodeURIComponent(roomId)}`;
+    const wsUrl = `${WORKER_URL.replace(/^http/, 'ws')}/browser?roomId=${encodeURIComponent(roomId)}${WORKER_TOKEN ? `&token=${encodeURIComponent(WORKER_TOKEN)}` : ''}`;
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
-
-    ws.onopen = () => {
-      setStatus('connected');
-      setError('');
-    };
+    ws.onopen = () => { setStatus('connected'); setError(''); };
     ws.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'frame') setFrame(`data:image/jpeg;base64,${message.data}`);
-        if (message.type === 'state') {
-          setUrlInput(message.url || '');
-        }
-        if (message.type === 'error') {
-          setStatus('error');
-          setError(message.message || 'Browser worker error');
-        }
+        if (message.type === 'state') setUrlInput(message.url || '');
+        if (message.type === 'error') { setStatus('error'); setError(message.message || 'Browser worker error'); }
       } catch {}
     };
-    ws.onerror = () => {
-      setStatus('error');
-      setError('Could not connect to the self-hosted browser worker.');
-    };
-    ws.onclose = () => {
-      if (status !== 'error') setStatus('offline');
-    };
+    ws.onerror = () => { setStatus('error'); setError('Could not connect to the self-hosted browser worker.'); };
+    ws.onclose = () => { if (socketRef.current === ws) setStatus('offline'); };
     return () => {
       ws.close();
-      socketRef.current = null;
+      if (socketRef.current === ws) socketRef.current = null;
     };
-  }, [roomId, status]);
+  }, [roomId]);
 
   const send = (message: Record<string, unknown>) => {
     const ws = socketRef.current;
@@ -127,41 +96,17 @@ export const RemoteBrowserView: React.FC = () => {
             <button disabled={navDisabled} className="text-slate-400 hover:text-white disabled:opacity-30"><Search className="w-3.5 h-3.5" /></button>
           </div>
         </form>
-        <div className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-[11px] text-slate-300">
-          <Crown className="w-3 h-3 text-amber-400" />
-          {isUserTheController ? 'You control browsing' : `${controllerName} controls`}
-        </div>
+        <div className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-[11px] text-slate-300"><Crown className="w-3 h-3 text-amber-400" />{isUserTheController ? 'You control browsing' : `${controllerName} controls`}</div>
         <button onClick={() => setFollowHost(!followHost)} className={`hidden sm:block px-2.5 py-1 rounded-lg border text-[11px] ${followHost ? 'border-sky-500/30 text-sky-300 bg-sky-500/10' : 'border-slate-700 text-slate-400 bg-slate-800'}`}>Follow: {followHost ? 'ON' : 'OFF'}</button>
         {!isUserTheController && <button onClick={requestControl} className="px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-[11px]"><Hand className="inline w-3 h-3 mr-1" />Control</button>}
         {browserState.url && <a href={browserState.url} target="_blank" rel="noreferrer" className="p-1.5 text-slate-400 hover:text-white"><ExternalLink className="w-4 h-4" /></a>}
         <button onClick={() => toggleFullscreen('browser')} className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">{isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}</button>
       </div>
 
-      {isHost && pendingControlRequest && (
-        <div className="px-4 py-2 bg-amber-950/80 border-b border-amber-500/30 text-xs flex items-center justify-between">
-          <span className="text-amber-200"><strong>{pendingControlRequest.userName}</strong> wants browser control.</span>
-          <div className="flex gap-2"><button onClick={() => respondControl(pendingControlRequest.userId, true)} className="px-3 py-1 rounded bg-amber-500 text-slate-950 font-bold">Allow</button><button onClick={() => respondControl(pendingControlRequest.userId, false)} className="px-3 py-1 rounded bg-slate-800 text-slate-300">Deny</button></div>
-        </div>
-      )}
+      {isHost && pendingControlRequest && <div className="px-4 py-2 bg-amber-950/80 border-b border-amber-500/30 text-xs flex items-center justify-between"><span className="text-amber-200"><strong>{pendingControlRequest.userName}</strong> wants browser control.</span><div className="flex gap-2"><button onClick={() => respondControl(pendingControlRequest.userId, true)} className="px-3 py-1 rounded bg-amber-500 text-slate-950 font-bold">Allow</button><button onClick={() => respondControl(pendingControlRequest.userId, false)} className="px-3 py-1 rounded bg-slate-800 text-slate-300">Deny</button></div></div>}
 
-      <div
-        ref={stageRef}
-        tabIndex={0}
-        onClick={handlePointer}
-        onContextMenu={e => e.preventDefault()}
-        onWheel={handleWheel}
-        onKeyDown={handleKey}
-        className="flex-1 min-h-0 flex items-center justify-center bg-black outline-none"
-      >
-        {frame ? (
-          <img src={frame} alt="Shared browser" draggable={false} className="w-full h-full object-contain select-none" />
-        ) : (
-          <div className="text-center text-slate-400 max-w-md px-6">
-            {status === 'connecting' ? <RotateCw className="w-7 h-7 mx-auto mb-3 animate-spin text-sky-400" /> : <Monitor className="w-7 h-7 mx-auto mb-3" />}
-            <div className="text-sm font-semibold text-slate-200">{status === 'connected' ? 'Starting shared Chromium…' : 'Shared browser offline'}</div>
-            {error && <div className="mt-2 text-xs text-amber-300 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{error}</div>}
-          </div>
-        )}
+      <div ref={stageRef} tabIndex={0} onClick={handlePointer} onContextMenu={e => e.preventDefault()} onWheel={handleWheel} onKeyDown={handleKey} className="flex-1 min-h-0 flex items-center justify-center bg-black outline-none">
+        {frame ? <img src={frame} alt="Shared browser" draggable={false} className="w-full h-full object-contain select-none" /> : <div className="text-center text-slate-400 max-w-md px-6">{status === 'connecting' ? <RotateCw className="w-7 h-7 mx-auto mb-3 animate-spin text-sky-400" /> : <Monitor className="w-7 h-7 mx-auto mb-3" />}<div className="text-sm font-semibold text-slate-200">{status === 'connected' ? 'Starting shared Chromium…' : 'Shared browser offline'}</div>{error && <div className="mt-2 text-xs text-amber-300 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{error}</div>}</div>}
       </div>
     </div>
   );

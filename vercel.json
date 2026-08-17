@@ -4,6 +4,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "functions": {
+    "api/ws.ts": {
+      "includeFiles": ["dist/server.cjs"]
+    },
+    "api/[...path].ts": {
+      "includeFiles": ["dist/server.cjs"]
+    }
+  },
   "rewrites": [
     { "source": "/room/:path*", "destination": "/index.html" }
   ]

@@ -1,4 +1,4 @@
-import { createApp } from '../server.ts';
+import { createApp } from '../dist/server.cjs';
 
 const appPromise = createApp();
 

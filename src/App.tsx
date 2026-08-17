@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useRoomStore } from './store/useRoomStore.ts';
 import { Lobby } from './components/Lobby.tsx';
 import { Header } from './components/Header.tsx';
-import { RemoteBrowserView } from './components/RemoteBrowserView.tsx';
+import { BrowserView } from './components/BrowserView.tsx';
 import { ScreenShareView } from './components/ScreenShareView.tsx';
 import { CameraGridView } from './components/CameraGridView.tsx';
 import { VideoPlayerView } from './components/VideoPlayerView.tsx';
@@ -21,11 +21,10 @@ export default function App() {
 
   useEffect(() => {
     const pathMatch = window.location.pathname.match(/\/room\/([a-zA-Z0-9]+)/i);
-    const queryRoom = new URLSearchParams(window.location.search).get('room');
-    const targetRoom = (pathMatch && pathMatch[1]) || queryRoom;
+    const targetRoom = (pathMatch && pathMatch[1]) || new URLSearchParams(window.location.search).get('room');
     if (targetRoom && !roomId) {
       const savedName = localStorage.getItem('syncroom_username') || `User${Math.floor(1000 + Math.random() * 9000)}`;
-      joinRoom(targetRoom.toUpperCase(), savedName);
+      void joinRoom(targetRoom.toUpperCase(), savedName);
     }
   }, [joinRoom, roomId]);
 
@@ -48,20 +47,15 @@ export default function App() {
   }, [fullscreenContent, setFullscreenContent]);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && roomId) {
-        if (!socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
-        else socketService.send({ type: 'ping', timestamp: Date.now() });
-      }
+    const reconnect = () => {
+      if (!roomId) return;
+      if (!socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
+      else socketService.send({ type: 'ping', timestamp: Date.now() });
     };
-    const handleOnline = () => {
-      if (roomId && !socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && reconnect());
+    window.addEventListener('online', reconnect);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('online', reconnect);
     };
   }, [roomId, currentUserName]);
 
@@ -78,7 +72,7 @@ export default function App() {
       )}
       <main className="flex-1 w-full h-full relative overflow-hidden flex">
         <div className="flex-1 w-full h-full relative overflow-hidden">
-          {mode === 'BROWSE' && <RemoteBrowserView />}
+          {mode === 'BROWSE' && <BrowserView />}
           {mode === 'SCREEN_SHARE' && <ScreenShareView />}
           {mode === 'CAMERAS' && <CameraGridView />}
           {mode === 'VIDEO' && <VideoPlayerView />}

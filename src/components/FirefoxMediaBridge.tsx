@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Radio, ShieldCheck, ExternalLink, Zap } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore.ts';
-import { socketService } from '../services/socket.ts';
 
 interface BridgeMedia {
   title: string;
@@ -12,6 +11,7 @@ interface BridgeMedia {
   playbackRate: number;
   hasHls: boolean;
   hasVideo: boolean;
+  action?: string;
 }
 
 export const FirefoxMediaBridge: React.FC = () => {
@@ -62,11 +62,7 @@ export const FirefoxMediaBridge: React.FC = () => {
     window.postMessage({
       source: 'syncroom-web',
       type: 'SYNCROOM_EXTENSION_COMMAND',
-      payload: {
-        action,
-        position: videoState.position,
-        playbackRate: videoState.playbackRate,
-      },
+      payload: { action, position: videoState.position, playbackRate: videoState.playbackRate },
     }, '*');
   }, [connected, isController, media, videoState.isPlaying, videoState.position, videoState.playbackRate]);
 

@@ -50,10 +50,7 @@
   const sendEvent = (action) => {
     if (!activeVideo || Date.now() < ignoreEventsUntil) return;
     const data = snapshot(activeVideo);
-    browserApi.runtime.sendMessage({
-      type: 'SOURCE_MEDIA_EVENT',
-      payload: { ...data, action },
-    });
+    browserApi.runtime.sendMessage({ type: 'SOURCE_MEDIA_EVENT', payload: { ...data, action } });
   };
 
   const bindVideo = (video) => {
@@ -72,45 +69,53 @@
     if (video) bindVideo(video);
   };
 
+  browserApi.runtime.onMessage.addListener((message) => {
+    if (!message) return;
+
+    if (message.type === 'PAIR_SOURCE_TAB') {
+      browserApi.runtime.sendMessage({ type: 'PAIR_SOURCE_TAB' }).catch(() => {});
+      scan();
+      return;
+    }
+
+    if (message.type === 'PAIR_SYNCROOM_TAB') {
+      browserApi.runtime.sendMessage({ type: 'PAIR_SYNCROOM_TAB' }).catch(() => {});
+      return;
+    }
+
+    if (!isSyncRoom && message.type === 'SYNCROOM_COMMAND') {
+      scan();
+      if (!activeVideo) return;
+      const command = message.payload || {};
+      ignoreEventsUntil = Date.now() + 800;
+      try {
+        if (command.action === 'PLAY') {
+          if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
+          activeVideo.playbackRate = command.playbackRate || 1;
+          activeVideo.play().catch(() => {});
+        } else if (command.action === 'PAUSE') {
+          if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
+          activeVideo.pause();
+        } else if (command.action === 'SEEK') {
+          if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
+        } else if (command.action === 'RATE') {
+          activeVideo.playbackRate = command.playbackRate || 1;
+        }
+      } catch (_) {}
+      setTimeout(() => sendSnapshot(true), 900);
+    }
+  });
+
   if (!isSyncRoom) {
     scan();
     scanTimer = setInterval(scan, 1500);
-
-    browserApi.runtime.onMessage.addListener((message) => {
-      if (!message) return;
-      if (message.type === 'SYNCROOM_COMMAND') {
-        scan();
-        if (!activeVideo) return;
-        const command = message.payload || {};
-        ignoreEventsUntil = Date.now() + 800;
-        try {
-          if (command.action === 'PLAY') {
-            if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
-            activeVideo.playbackRate = command.playbackRate || 1;
-            activeVideo.play().catch(() => {});
-          } else if (command.action === 'PAUSE') {
-            if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
-            activeVideo.pause();
-          } else if (command.action === 'SEEK') {
-            if (Number.isFinite(command.position)) activeVideo.currentTime = command.position;
-          } else if (command.action === 'RATE') {
-            activeVideo.playbackRate = command.playbackRate || 1;
-          }
-        } catch (_) {}
-        setTimeout(() => sendSnapshot(true), 900);
-      }
-    });
   } else {
     browserApi.runtime.sendMessage({ type: 'PAIR_SYNCROOM_TAB' }).catch(() => {});
 
     window.addEventListener('message', (event) => {
-      if (event.source !== window) return;
-      if (event.data?.source !== 'syncroom-web') return;
+      if (event.source !== window || event.data?.source !== 'syncroom-web') return;
       if (event.data.type === 'SYNCROOM_EXTENSION_COMMAND') {
-        browserApi.runtime.sendMessage({
-          type: 'SYNCROOM_COMMAND',
-          payload: event.data.payload,
-        }).catch(() => {});
+        browserApi.runtime.sendMessage({ type: 'SYNCROOM_COMMAND', payload: event.data.payload }).catch(() => {});
       }
     });
 

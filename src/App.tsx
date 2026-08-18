@@ -6,6 +6,7 @@ import { BrowserView } from './components/BrowserView.tsx';
 import { ScreenShareView } from './components/ScreenShareView.tsx';
 import { CameraGridView } from './components/CameraGridView.tsx';
 import { VideoPlayerView } from './components/VideoPlayerView.tsx';
+import { HlsVideoBridge } from './components/HlsVideoBridge.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { ParticipantsPanel } from './components/ParticipantsPanel.tsx';
 import { BottomToolbar } from './components/BottomToolbar.tsx';
@@ -52,9 +53,11 @@ export default function App() {
       if (!socketService.isConnected) socketService.connect(roomId, currentUserName, false, false);
       else socketService.send({ type: 'ping', timestamp: Date.now() });
     };
-    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && reconnect());
+    const onVisibility = () => document.visibilityState === 'visible' && reconnect();
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('online', reconnect);
     return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('online', reconnect);
     };
   }, [roomId, currentUserName]);
@@ -63,6 +66,7 @@ export default function App() {
 
   return (
     <div id="syncroom-app-root" className="w-full h-full min-h-[100dvh] flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative select-none">
+      <HlsVideoBridge />
       {!isFullscreen && <Header />}
       {connectionStatus === 'reconnecting' && !isFullscreen && (
         <div className="bg-amber-500/90 text-slate-950 px-4 py-1.5 text-xs font-bold flex items-center justify-center gap-2 z-40 shadow-md">

@@ -7,6 +7,7 @@ import { ScreenShareView } from './components/ScreenShareView.tsx';
 import { CameraGridView } from './components/CameraGridView.tsx';
 import { VideoPlayerView } from './components/VideoPlayerView.tsx';
 import { HlsVideoBridge } from './components/HlsVideoBridge.tsx';
+import { FirefoxMediaBridge } from './components/FirefoxMediaBridge.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { ParticipantsPanel } from './components/ParticipantsPanel.tsx';
 import { BottomToolbar } from './components/BottomToolbar.tsx';
@@ -80,6 +81,7 @@ export default function App() {
           {mode === 'SCREEN_SHARE' && <ScreenShareView />}
           {mode === 'CAMERAS' && <CameraGridView />}
           {mode === 'VIDEO' && <VideoPlayerView />}
+          {mode === 'VIDEO' && <FirefoxMediaBridge />}
         </div>
         {!isFullscreen && <ChatPanel />}
         {!isFullscreen && <ParticipantsPanel />}

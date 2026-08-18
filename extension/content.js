@@ -14,10 +14,7 @@
   let lastSnapshot = '';
   let scanTimer = null;
 
-  const getHlsHint = () => {
-    const resources = performance.getEntriesByType('resource');
-    return resources.some((entry) => /\.m3u8(?:[?#]|$)/i.test(entry.name));
-  };
+  const getHlsHint = () => performance.getEntriesByType('resource').some((entry) => /\.m3u8(?:[?#]|$)/i.test(entry.name));
 
   const chooseVideo = () => {
     const videos = [...document.querySelectorAll('video')];
@@ -29,7 +26,6 @@
 
   const snapshot = (video) => ({
     title: document.title || 'Firefox media',
-    pageUrl: location.href,
     duration: Number.isFinite(video?.duration) ? video.duration : 0,
     position: video?.currentTime || 0,
     isPlaying: !!video && !video.paused && !video.ended,
@@ -49,8 +45,7 @@
 
   const sendEvent = (action) => {
     if (!activeVideo || Date.now() < ignoreEventsUntil) return;
-    const data = snapshot(activeVideo);
-    browserApi.runtime.sendMessage({ type: 'SOURCE_MEDIA_EVENT', payload: { ...data, action } });
+    browserApi.runtime.sendMessage({ type: 'SOURCE_MEDIA_EVENT', payload: { ...snapshot(activeVideo), action } });
   };
 
   const bindVideo = (video) => {
@@ -122,12 +117,7 @@
     browserApi.runtime.onMessage.addListener((message) => {
       if (!message) return;
       if (message.type === 'SOURCE_MEDIA_READY' || message.type === 'SOURCE_MEDIA_EVENT' || message.type === 'BRIDGE_STATUS') {
-        window.postMessage({
-          source: 'syncroom-extension',
-          type: message.type,
-          payload: message.payload,
-          connected: message.connected,
-        }, '*');
+        window.postMessage({ source: 'syncroom-extension', type: message.type, payload: message.payload, connected: message.connected }, '*');
       }
     });
   }
